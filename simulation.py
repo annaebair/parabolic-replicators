@@ -2,9 +2,12 @@
 Implementation of parabolic replicators on a 2D grid using the basic idea that elements can share the same grid square.
 """
 
+import math
+import random
 import numpy as np
 from scipy.stats import expon
 
+random.seed(0)
 np.random.seed(0)
 
 
@@ -65,18 +68,53 @@ class Grid:
         rxn = np.random.choice(['a', 'b', 'c'], p=probs)
         return rxn, r_tot
 
+    def von_neumann_neighborhood(self, x, y):
+        options = [(x-1, y), (x+1, y), (x, y-1), (x, y+1)]
+        return [(i % self.size, j % self.size) for (i, j) in options]
+
+    def motion(self):
+        val_to_idx = {self.A_value: self.A_idx, self.T_value: self.T_idx, self.D_value: self.D_idx}
+        grid_squares = np.arange(self.size ** 2)
+        tuples = [(int(math.floor(s / 10)), s % 10) for s in grid_squares]
+        random.shuffle(tuples)
+        for tup in tuples:
+            x, y = tup
+            vec = self.grid[tup]
+            objects = [self.A_value] * int(vec[self.A_idx]) + [self.T_value] * int(vec[self.T_idx]) + [self.D_value] * int(vec[self.D_idx])
+            neighbors = self.von_neumann_neighborhood(x, y)
+            for obj in objects:
+                options = []
+                occupancy = self.grid @ self.weights
+                for n in neighbors:
+                    n_x, n_y = n
+                    if occupancy[n_x, n_y] + obj <= 1:
+                        options.append(n)
+                if len(options) > 0:
+                    new_square = random.choice(options)
+                    object_idx = val_to_idx[obj]
+                    self.grid[x, y, object_idx] -= 1
+                    self.grid[new_square[0], new_square[1], object_idx] += 1
+
     def gillespie(self, time):
         rxns = {'a': 0, 'b': 0, 'c': 0}
+        A_count = int(np.sum(self.grid[:, :, self.A_idx]))
+        T_count = int(np.sum(self.grid[:, :, self.T_idx]))
+        D_count = int(np.sum(self.grid[:, :, self.D_idx]))
+        print(f'Starting element counts: A: {A_count}, T: {T_count}, D: {D_count}')
         A_count, T_count, D_count = 0, 0, 0
+        interval = 0
+        checkpoints = [1000, 5000, 7500, 10000, 20000, 30000, 40000]
+        pointer = 0
         while self.time < time:
+            interval += 1
+            if interval % 1000 == 0: print(f'{round(self.time / time, 2)* 100}% completed')
             element_locs = {'a': np.nonzero((self.grid[:, :, self.T_idx] == 2)),
                             'b': np.nonzero(self.grid[:, :, self.D_idx] == 1),
                             'c': np.nonzero((self.grid[:, :, self.A_idx] == 2) & (self.grid[:, :, self.T_idx] == 1))
                             }
-            new_vectors = {'a': [0, 0, 1],
-                           'b': [0, 2, 0],
-                           'c': [0, 0, 1]}
+            new_vectors = {'a': [0, 0, 1], 'b': [0, 2, 0], 'c': [0, 0, 1]}
 
+            self.motion()
             rxn, r_tot = self.rxn_choice(element_locs)
             if rxn is None:
                 # TODO: Modify this behavior once diffusion is added
@@ -93,21 +131,25 @@ class Grid:
             T_count = int(np.sum(self.grid[:, :, self.T_idx]))
             D_count = int(np.sum(self.grid[:, :, self.D_idx]))
             rxns[rxn] += 1
+            if pointer < len(checkpoints):
+                if self.time > checkpoints[pointer]:
+                    print(checkpoints[pointer], ': ', 'A:', A_count, 'T:', T_count, 'D:', D_count)
+                    pointer += 1
         print(f'Total number of each reaction: {rxns}')
         return A_count, T_count, D_count
 
 
 def main():
     a_rate = 1e-1
-    b_rate = 1e-2
-    c_rate = 1e-3
+    b_rate = 1e-3
+    c_rate = 1e-5
     frac_occupied = 0.4
-    grid = Grid(size=15,
+    grid = Grid(size=10,
                 a=a_rate,
                 b=b_rate,
                 c=c_rate,
                 f=frac_occupied)
-    A, T, D = grid.gillespie(100)
+    A, T, D = grid.gillespie(50000)
     print(f'Final element counts: A: {A}, T: {T}, D: {D}')
 
 
