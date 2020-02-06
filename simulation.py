@@ -6,9 +6,7 @@ import math
 import random
 import numpy as np
 from scipy.stats import expon
-
-random.seed(0)
-np.random.seed(0)
+import matplotlib.pyplot as plt
 
 
 class Grid:
@@ -39,9 +37,10 @@ class Grid:
         """
         frac_T = 0.1
         N_max = (1/min(self.weights)) * self.size ** 2
-        T_max = f * N_max
-        T_0 = round(T_max * frac_T)
-        A_0 = round(self.T_value/self.A_value * (T_max - T_0))
+        N = round(f * N_max)
+        T_0 = round(N * frac_T * 0.5)
+        A_0 = N - 2 * T_0
+        print(T_0, A_0, N)
 
         for i in range(T_0):
             availability = self.grid @ self.weights
@@ -57,6 +56,10 @@ class Grid:
                 location = np.random.randint(0, len(possibilities[0]))
                 index = (possibilities[0][location], possibilities[1][location], self.A_idx)
                 self.grid[index] += 1
+            else: print('here')
+
+        A_count = int(np.sum(self.grid[:, :, self.A_idx]))
+        T_count = int(np.sum(self.grid[:, :, self.T_idx]))
 
     def rxn_choice(self, element_locs):
         rxn_counts = np.array([len(element_locs['a'][0]), len(element_locs['b'][0]),  len(element_locs['c'][0])])
@@ -73,6 +76,7 @@ class Grid:
         return [(i % self.size, j % self.size) for (i, j) in options]
 
     def motion(self):
+        # TODO: should larger elements move slower?
         val_to_idx = {self.A_value: self.A_idx, self.T_value: self.T_idx, self.D_value: self.D_idx}
         grid_squares = np.arange(self.size ** 2)
         tuples = [(int(math.floor(s / 10)), s % 10) for s in grid_squares]
@@ -103,11 +107,21 @@ class Grid:
         print(f'Starting element counts: A: {A_count}, T: {T_count}, D: {D_count}')
         A_count, T_count, D_count = 0, 0, 0
         interval = 0
-        checkpoints = [1000, 5000, 7500, 10000, 20000, 30000, 40000]
-        pointer = 0
+        # checkpoints = [1000, 5000, 7500, 10000, 20000, 30000, 40000]
+        # pointer = 0
+        x_count = []
+        times = []
         while self.time < time:
             interval += 1
-            if interval % 1000 == 0: print(f'{round(self.time / time, 2)* 100}% completed')
+            # if interval % 1000 == 0:
+            #     print(f'{round(self.time / time, 2)* 100}% completed')
+            #     print(f'T + 2A squares: {len(np.nonzero((self.grid[:, :, 0] == 2) & (self.grid[:, :, 1] == 1))[0])}, '
+            #           f'2T squares: {len(np.nonzero(self.grid[:, :, 1] == 2)[0])}, '
+            #           f'D squares: {len(np.nonzero(self.grid[:, :, 2] == 1)[0])}')
+            #     A_count = int(np.sum(self.grid[:, :, self.A_idx]))
+            #     T_count = int(np.sum(self.grid[:, :, self.T_idx]))
+            #     D_count = int(np.sum(self.grid[:, :, self.D_idx]))
+            #     print(f'num A: {A_count}, num T: {T_count} num D: {D_count}')
             element_locs = {'a': np.nonzero((self.grid[:, :, self.T_idx] == 2)),
                             'b': np.nonzero(self.grid[:, :, self.D_idx] == 1),
                             'c': np.nonzero((self.grid[:, :, self.A_idx] == 2) & (self.grid[:, :, self.T_idx] == 1))
@@ -131,26 +145,41 @@ class Grid:
             T_count = int(np.sum(self.grid[:, :, self.T_idx]))
             D_count = int(np.sum(self.grid[:, :, self.D_idx]))
             rxns[rxn] += 1
-            if pointer < len(checkpoints):
-                if self.time > checkpoints[pointer]:
-                    print(checkpoints[pointer], ': ', 'A:', A_count, 'T:', T_count, 'D:', D_count)
-                    pointer += 1
+            x_count.append(T_count + 2 * D_count)
+            times.append(self.time)
+            # if pointer < len(checkpoints):
+            #     if self.time > checkpoints[pointer]:
+            #         print(checkpoints[pointer], ': ', 'A:', A_count, 'T:', T_count, 'D:', D_count)
+            #         pointer += 1
+
         print(f'Total number of each reaction: {rxns}')
-        return A_count, T_count, D_count
+        print('num of T + 2A squares:', len(np.nonzero((self.grid[:, :, 0] == 2) & (self.grid[:, :, 1] == 1))[0]))
+        print('num of 2T squares:', len(np.nonzero(self.grid[:, :, 1] == 2)[0]))
+        return A_count, T_count, D_count, x_count, times
 
 
 def main():
-    a_rate = 1e-1
-    b_rate = 1e-3
-    c_rate = 1e-5
-    frac_occupied = 0.4
-    grid = Grid(size=10,
-                a=a_rate,
-                b=b_rate,
-                c=c_rate,
-                f=frac_occupied)
-    A, T, D = grid.gillespie(50000)
-    print(f'Final element counts: A: {A}, T: {T}, D: {D}')
+    for s in range(5):
+        print('S:', s)
+        random.seed(s)
+        np.random.seed(s)
+        a_rate = 1e-1
+        b_rate = 1e-2
+        c_rate = 1e-4
+        frac_occupied = 0.8
+        grid = Grid(size=10,
+                    a=a_rate,
+                    b=b_rate,
+                    c=c_rate,
+                    f=frac_occupied)
+        A, T, D, x_counts, times = grid.gillespie(5000)
+        print(f'Final element counts: A: {A}, T: {T}, D: {D}')
+        plt.plot(times, np.sqrt(x_counts))
+        plt.xlabel('timesteps')
+        # plt.ylim((0, max(x_counts)+ 10))
+        plt.ylabel('Number of T elements')
+        plt.title('Trajectories for 30% occupied')
+    plt.show()
 
 
 if __name__ == '__main__':
