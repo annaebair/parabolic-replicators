@@ -9,70 +9,79 @@ from scipy.stats import expon
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import matplotlib.ticker
-plt.rcParams['animation.ffmpeg_path'] = '/usr/bin/ffmpeg'
 
 
 class Grid:
-    def __init__(self, size, a, b, c, f):
+    def __init__(self, size, a, b, c, f, m):
         self.size = size
-        self.num_types = 3
-        self.A_idx = 0
-        self.T_idx = 1
-        self.D_idx = 2
-        self.A_value = 0.25
-        self.T_value = 0.5
-        self.D_value = 1
-        self.square_max = 1
-        self.weights = [self.A_value, self.T_value, self.D_value]
-        self.grid = np.zeros((self.size, self.size, self.num_types))
-        self.vn_neighbors = {}
-        self.val_to_idx = {self.A_value: self.A_idx, self.T_value: self.T_idx, self.D_value: self.D_idx}
-
-        self.tuples = [(int(math.floor(s / size)), s % size) for s in np.arange(size ** 2)]
 
         self.a = a
         self.b = b
         self.c = c
+        self.m = m
+
+        self.num_types = 3
+        self.a_idx = 0
+        self.t_idx = 1
+        self.d_idx = 2
+        self.a_value = 0.25
+        self.t_value = 0.5
+        self.d_value = 1
+        self.square_max = 1
+
+        self.weights = [self.a_value, self.t_value, self.d_value]
+        self.grid = np.zeros((self.size, self.size, self.num_types))
+        self.val_to_idx = {self.a_value: self.a_idx, self.t_value: self.t_idx, self.d_value: self.d_idx}
+
+        self.tuples = [(int(math.floor(s / size)), s % size) for s in np.arange(size ** 2)]
+
+        self.vn_neighbors = {}
 
         self.time = 0
-        self.N, self.T_0, self.A_0 = self.initialize_grid(f)
+
+        self.initialize_grid(f)
 
     def initialize_grid(self, f):
         """
         Place correct initial ratios of elements onto the grid. Indicate presence of an element as +1. Multiply
-        by weights vector to determine how much space is left on each square given the "size" of each element.
+        by weights vector to determine how much space is left on each square given the size of each element.
         """
-        frac_T = 0.1
-        N_max = (1/min(self.weights)) * self.size ** 2
-        N = round(f * N_max)
-        T_0 = round(N * frac_T * self.T_value)
-        A_0 = round(N - (self.T_value / self.A_value) * T_0)
+        frac_t = 0.1
+        n_max = (1/min(self.weights)) * self.size ** 2
+        n = round(f * n_max)
+        t_0 = round(n * frac_t * self.t_value)
+        a_0 = round(n - (self.t_value / self.a_value) * t_0)
 
-        for i in range(T_0):
-            availability = self.grid @ self.weights
-            possibilities = np.nonzero(availability <= (self.square_max - self.T_value))
+        for i in range(t_0):
+            occupancy = self._occupancy()
+            possibilities = np.nonzero(occupancy <= (self.square_max - self.t_value))
             if len(possibilities[0]) > 0:
                 location = np.random.randint(0, len(possibilities[0]))
-                index = (possibilities[0][location], possibilities[1][location], self.T_idx)
+                index = (possibilities[0][location], possibilities[1][location], self.t_idx)
                 self.grid[index] += 1
-        for i in range(A_0):
-            availability = self.grid @ self.weights
-            possibilities = np.nonzero(availability <= (self.square_max - self.A_value))
+        for i in range(a_0):
+            occupancy = self._occupancy()
+            possibilities = np.nonzero(occupancy <= (self.square_max - self.a_value))
             if len(possibilities[0]) > 0:
                 location = np.random.randint(0, len(possibilities[0]))
-                index = (possibilities[0][location], possibilities[1][location], self.A_idx)
+                index = (possibilities[0][location], possibilities[1][location], self.a_idx)
                 self.grid[index] += 1
-        return N, T_0, A_0
+
+    def _counts(self):
+        a = int(np.sum(self.grid[:, :, self.a_idx]))
+        t = int(np.sum(self.grid[:, :, self.t_idx]))
+        d = int(np.sum(self.grid[:, :, self.d_idx]))
+        return a, t, d
+
+    def _occupancy(self):
+        return self.grid @ self.weights
 
     def rxn_choice(self, r):
-        occupancy = self.grid @ self.weights
-        element_locs = {'a': np.nonzero(self.grid[:, :, self.T_idx] == 2),
-                        'b': np.nonzero(self.grid[:, :, self.D_idx] == 1),
-                        'c': np.nonzero((self.grid[:, :, self.A_idx] == 2) & (self.grid[:, :, self.T_idx] == 1)),
-                        'exchange': (np.nonzero(occupancy == 0), np.nonzero(occupancy == 1))
+        element_locs = {'a': np.nonzero(self.grid[:, :, self.t_idx] == 2),
+                        'b': np.nonzero(self.grid[:, :, self.d_idx] == 1),
+                        'c': np.nonzero((self.grid[:, :, self.a_idx] == 2) & (self.grid[:, :, self.t_idx] == 1)),
+                        'exchange': None
                         }
-        # put some amt of stuff on an empty square, take all the stuff off a full square - maybe better ways to do this
         rxn_counts = np.array([len(element_locs['a'][0]), len(element_locs['b'][0]),  len(element_locs['c'][0])])
         rxn_ratios = [self.a, self.b, self.c] * rxn_counts
         ratios = np.concatenate((rxn_ratios, [r]))
@@ -92,123 +101,139 @@ class Grid:
             return neighbors
 
     def motion(self, timesteps):
-        steps = math.floor(timesteps)
-        random_nums = np.random.random(size=round(self.size ** 2 * (1/self.A_value) * steps))
-        rand_idx = 0
-        occupancy = self.grid @ self.weights
-        for s in range(steps):
-            random.shuffle(self.tuples)
-            for tup in self.tuples:
-                x, y = tup
-                # vector of counts of each element on the square
-                vec = self.grid[tup]
-                # objects is a list of values of objects
-                objects = [self.A_value] * int(vec[self.A_idx]) + [self.T_value] * int(vec[self.T_idx]) + \
-                          [self.D_value] * int(vec[self.D_idx])
-                neighbors = self.von_neumann_neighborhood(x, y)
-                neighbor_occupancy = np.array([occupancy[n] for n in neighbors])
-                # TODO: Is it worth adding something here to stop searching if there are no valid locations for
-                #  any remaining objects?
-                # Seems to break here for density ~< 0.3
-                for obj in objects:
-                    options = np.array(neighbors)[np.nonzero(neighbor_occupancy <= 1 - obj)[0]]
-                    if len(options) > 0:
-                        new_square = random.choice(options)
-                        object_idx = self.val_to_idx[obj]
-                        # Make objects move probabilistically at rate inversely proportional to size
-                        if random_nums[rand_idx] < 1/(4 * obj):
-                            self.grid[x, y, object_idx] -= 1
-                            self.grid[new_square[0], new_square[1], object_idx] += 1
-                            occupancy = self.grid @ self.weights
-                            neighbor_occupancy = np.array([occupancy[n] for n in neighbors])
-                        rand_idx += 1
+        # Number of steps depends on dt, diffusion rate, and grid size
+        steps = timesteps * self.m * self.size ** 2
+        occupancy = self._occupancy()
+        for s in range(math.floor(steps)):
+            a_count, t_count, d_count = self._counts()
+            tot = a_count + t_count + d_count
+            probs = np.array([a_count, t_count, d_count])/tot
+            obj = np.random.choice([self.a_value, self.t_value, self.d_value], p=probs)
+            idx = self.val_to_idx[obj]
+            option_grid = self.grid[:, :, idx]
+            if np.sum(option_grid) == 0:
+                continue
+            flattened_option_grid = option_grid.flatten() / np.sum(option_grid)
+            nums = np.arange(0, self.size ** 2)
+            location = np.random.choice(nums, p=flattened_option_grid)
+            x = int(math.floor(location / self.size))
+            y = location % self.size
+            neighbors = self.von_neumann_neighborhood(x, y)
+            neighbor_occupancy = np.array([occupancy[n] for n in neighbors])
+            options = np.array(neighbors)[np.nonzero(neighbor_occupancy <= 1 - obj)[0]]
+            if len(options) > 0:
+                new_square = random.choice(options)
+                # Make objects move probabilistically at rate inversely proportional to size
+                if random.random() < 1 / (4 * obj):
+                    self.grid[x, y, idx] -= 1
+                    self.grid[new_square[0], new_square[1], idx] += 1
+                    occupancy = self._occupancy()
 
-    def gillespie(self, time, r):
+    def gillespie(self, time, r, anim):
         new_vectors = {'a': [0, 0, 1], 'b': [0, 2, 0], 'c': [0, 0, 1]}
-        A_count = int(np.sum(self.grid[:, :, self.A_idx]))
-        T_count = int(np.sum(self.grid[:, :, self.T_idx]))
-        D_count = int(np.sum(self.grid[:, :, self.D_idx]))
-        print(f'Starting element counts: A: {A_count}, T: {T_count}, D: {D_count}')
-        A_count, T_count, D_count = 0, 0, 0
+        a_count, t_count, d_count = self._counts()
+        print(f'Starting element counts: A: {a_count}, T: {t_count}, D: {d_count}')
+        a_count, t_count, d_count = 0, 0, 0
         interval = 0
         x_count = []
         times = []
         plots = []
-
         cmaplist = [(1, 1, 1, 1), (0, 0.8, 0.2, 1), (0, 0, 1, 1), (0.7, 0.2, 0, 1), (0.8, 0, 0.1, 1)]
         no_d_cmaplist = [(1, 1, 1, 1), (0, 0.8, 0.2, 1), (0, 0, 1, 1)]
-        N = len(cmaplist)
-        no_d_N = len(no_d_cmaplist)
-        my_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, N)
-        no_d_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', no_d_cmaplist, no_d_N)
-
+        my_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, len(cmaplist))
+        no_d_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', no_d_cmaplist, len(no_d_cmaplist))
         while self.time < time:
             interval += 1
             if interval % 100 == 0:
                 print(f'{int(round(self.time / time, 2)* 100)}% completed')
-            if interval % 100 == 0:
-
-                A_count = int(np.sum(self.grid[:, :, self.A_idx]))
-                T_count = int(np.sum(self.grid[:, :, self.T_idx]))
-                D_count = int(np.sum(self.grid[:, :, self.D_idx]))
-                if D_count == 0:
-                    p = plt.imshow(im_frame(self.grid), animated=True, cmap=no_d_cmap)
-                    plt.grid(True, animated=True)
-                    plt.axis('off')
-                    plots.append([p])
-                else:
-                    p1 = plt.imshow(im_frame(self.grid), animated=True, cmap=my_cmap)
-                    plt.grid(True, animated=True)
-                    plt.axis('off')
-                    plots.append([p1])
+            if interval % 1000 == 0 and anim:
+                _, _, d_count = self._counts()
+                anim_grid = im_frame(self.grid, self.a_idx, self.t_idx, self.d_idx)
+                cmap = no_d_cmap if d_count == 0 else my_cmap
+                p = plt.imshow(anim_grid, animated=True, cmap=cmap)
+                plt.axis('off')
+                plots.append([p])
             rxn, r_tot, locs = self.rxn_choice(r)
-            if rxn is None:
-                # Does this ever happen? Maybe at low densities? Should this continue with more motion until
-                # something is possible or time runs out?
-                print(f'No valid reactions at time={self.time}')
-                break
-            elif rxn in {'a', 'b', 'c'}:
+            if rxn in {'a', 'b', 'c'}:
                 choice_idx = np.random.randint(0, len(locs[0]))
                 self.grid[locs[0][choice_idx], locs[1][choice_idx]] = new_vectors[rxn]
-            else:  # rxn is exchange:
-                available, full = locs
-                # check if neither are len zero?
-                idx_to_place = np.random.randint(0, len(available[0]))
-                idx_to_remove = np.random.randint(0, len(full[0]))
-                # D, TT, AAAA, TTA
-                vecs_to_add = [[0, 0, 1], [0, 2, 0], [4, 0, 0], [2, 1, 0]]
-                # ratios of numbers of elements such that volume adds up to 1: 0.01, 0.02, 0.9
-                # should we account for size? i.e. T_bulk = 0.02, D_bulk = 0.08? This is for ratios of what elements
-                #  to select
-                # TODO: Also these are hardcoded so fix this eventually
-                T_bulk = 0.02
-                D_bulk = 0.08
-                A_bulk = 0.9
-                probs = np.array([D_bulk,
-                                  T_bulk ** 2,
-                                  A_bulk ** 4,
-                                  T_bulk * A_bulk ** 2])
-                normalized_probs = probs / sum(probs)
-                vec = vecs_to_add[np.random.choice([0, 1, 2, 3], p=normalized_probs)]
-                self.grid[available[0][idx_to_place], available[1][idx_to_place], :] += vec
-                self.grid[full[0][idx_to_remove], full[1][idx_to_remove], :] = 0
+            else:  # Exchange reaction
 
-            dt = expon(scale=r_tot).rvs() * 100
+                # Removing elements
+                a_count, t_count, d_count = self._counts()
+                counts_on_grid = np.array([a_count, t_count, d_count])
+                count_sum = np.sum(counts_on_grid)
+                p_a, p_t, p_d = a_count / count_sum, t_count / count_sum, d_count / count_sum
+                set_removal_ratios = [p_d, p_t ** 2, p_t * p_a ** 2, p_a ** 4]
+                set_removal_probs = set_removal_ratios/np.sum(set_removal_ratios)
+                set_to_remove = np.random.choice(['D', 'TT', 'TAA', 'AAAA'], p=set_removal_probs)
+                if set_to_remove == 'D':
+                    elements = [self.d_idx]
+                elif set_to_remove == 'TT':
+                    elements = [self.t_idx, self.t_idx]
+                elif set_to_remove == 'TAA':
+                    elements = [self.t_idx, self.a_idx, self.a_idx]
+                else:
+                    elements = [self.a_idx] * 4
+                for elt in elements:
+                    elt_grid = self.grid[:, :, elt]
+                    flat_elt_grid = elt_grid.flatten()
+                    flat_grid_probs = flat_elt_grid / np.sum(flat_elt_grid)
+                    nums = np.arange(0, self.size ** 2)
+                    to_remove = np.random.choice(nums, p=flat_grid_probs)
+                    x, y = int(math.floor(to_remove / self.size)), to_remove % self.size
+                    self.grid[x, y, elt] -= 1
+
+                # Adding elements
+                t_bulk = 0.02
+                d_bulk = 0.08
+                a_bulk = 0.9
+                bulk_probs = np.array([d_bulk, t_bulk ** 2, t_bulk * a_bulk ** 2, a_bulk ** 4])
+                occupancy = self._occupancy()
+                occ_25 = len(np.nonzero(occupancy <= 0.75)[0])
+                occ_50 = len(np.nonzero(occupancy <= 0.5)[0])
+                occ_1 = len(np.nonzero(occupancy == 1)[0])
+                occupancy_ratios = [occ_1, occ_50 ** 2, occ_50 * occ_25 ** 2, occ_25 ** 2]
+                occupancy_probs = occupancy_ratios / np.sum(occupancy_ratios)
+                probs = bulk_probs * occupancy_probs
+                normalized_probs = probs / np.sum(probs)
+                elt_set_to_add = np.random.choice(['D', 'TT', 'TAA', 'AAAA'], p=normalized_probs)
+                if elt_set_to_add == 'D':
+                    elements = [self.d_value]
+                elif elt_set_to_add == 'TT':
+                    elements = [self.t_value, self.t_value]
+                elif elt_set_to_add == 'TAA':
+                    elements = [self.t_value, self.a_value, self.a_value]
+                else:
+                    elements = [self.a_value] * 4
+                for elt_val in elements:
+                    occupancy = self._occupancy()
+                    open_spots = np.nonzero(occupancy <= (1-elt_val))
+                    num_open_spots = len(open_spots[0])
+                    if num_open_spots == 0:
+                        print(elements)
+                        print(occupancy)
+                    location = random.randint(0, num_open_spots-1)
+                    x, y = open_spots[0][location], open_spots[1][location]
+                    self.grid[x, y, self.val_to_idx[elt_val]] += 1
+                    # TODO: Could maybe be edge cases where this breaks - look into this
+
+            # Advance time
+            dt = expon(scale=r_tot).rvs()
             self.time += dt
             self.motion(dt)
 
-            A_count = int(np.sum(self.grid[:, :, self.A_idx]))
-            T_count = int(np.sum(self.grid[:, :, self.T_idx]))
-            D_count = int(np.sum(self.grid[:, :, self.D_idx]))
-            x_count.append(T_count + 2 * D_count)
+            # Keep track of x over time
+            a_count, t_count, d_count = self._counts()
+            x_count.append(t_count + 2 * d_count)
             times.append(self.time)
-        return A_count, T_count, D_count, x_count, times, plots
+        return a_count, t_count, d_count, x_count, times, plots
 
 
-def im_frame(grid):
-    a_grid = grid[:, :, 0]
-    t_grid = grid[:, :, 1]
-    d_grid = grid[:, :, 2]
+def im_frame(grid, a_idx, t_idx, d_idx):
+    a_grid = grid[:, :, a_idx]
+    t_grid = grid[:, :, t_idx]
+    d_grid = grid[:, :, d_idx]
     new_grid = np.zeros((20, 20))
     ax, ay = np.where(a_grid > 0)
     tx, ty = np.where(t_grid > 0)
@@ -256,42 +281,51 @@ def main():
         a_rate = 1e-1
         b_rate = 1e-2
         c_rate = 1e-4
-        frac_occupied = 0.8
+        frac_occupied = 0.1
         chemostat_rate = 0.001
+        diffusion_param = 0.01
         grid = Grid(size=10,
                     a=a_rate,
                     b=b_rate,
                     c=c_rate,
-                    f=frac_occupied)
+                    f=frac_occupied,
+                    m=diffusion_param)
 
-        A, T, D, x_counts, times, plots = grid.gillespie(5000, chemostat_rate)
+        A, T, D, x_counts, times, plots = grid.gillespie(500, chemostat_rate, anim=True)
+
+        # Write x_counts to file
 
         # with open(f'counts_chemostat_million_steps_{s}.txt', 'w+') as f:
         #     for i in range(len(x_counts)):
         #         x = x_counts[i]
         #         t = times[i]
         #         f.write(f'{t} {x}\n')
+
+        # Histogram of T_counts over trajectories
+
         # plt.hist(x_counts, bins=50, alpha=0.5)
         # plt.xlabel('Number of T')
         # plt.ylabel('Timesteps with number of T present')
         # plt.title('Histogram of counts of T for 3 trajectories')
         # plt.show()
-        print(f'Final element counts: A: {A}, T: {T}, D: {D}')
-        plt.plot(times, x_counts)
-        plt.xlabel('timesteps')
-        plt.ylabel('Number of T elements')
-        plt.title('Trajectories of T counts for 80% occupied')
-        plt.show()
-        # plt.plot(times, [i ** 2 for i in x_counts])
+
+        # x_count trajectories
+
+        # print(f'Final element counts: A: {A}, T: {T}, D: {D}')
+        # plt.plot(times, x_counts)
         # plt.xlabel('timesteps')
-        # plt.ylabel('Squared number of T elements')
-        # plt.title('Trajectories of T**2 counts for 80% occupied')
+        # plt.ylabel('Number of T elements')
+        # plt.title(f'Trajectories of T counts for {round(frac_occupied * 100)}% occupied')
+        # plt.show()
+
     # plt.show()
 
-    # ani = animation.ArtistAnimation(fig, plots, interval=500, blit=True,
-    #                                 repeat_delay=2000)
-    # ani.save('thing.html')
-    # plt.show()
+    # Animation
+
+    ani = animation.ArtistAnimation(fig, plots, interval=500, blit=True, repeat_delay=2000)
+    # ani.save('a.html')
+    plt.grid(color='k')
+    plt.show()
 
 
 if __name__ == '__main__':
