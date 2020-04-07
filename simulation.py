@@ -4,6 +4,7 @@ Implementation of parabolic replicators on a 2D grid using the basic idea that e
 
 import math
 import random
+import time
 import numpy as np
 from scipy.stats import expon
 import matplotlib as mpl
@@ -47,10 +48,10 @@ class Grid:
         by weights vector to determine how much space is left on each square given the size of each element.
         """
         frac_t = 0.1
-        n_max = (1/min(self.weights)) * self.size ** 2
-        n = round(f * n_max)
-        t_0 = round(n * frac_t * self.t_value)
-        a_0 = round(n - (self.t_value / self.a_value) * t_0)
+        n_max = (1/min(self.weights)) * self.size ** 2  # count of 4N, i.e. total mass
+        n = round(f * n_max)  # number (out of of 4N) (mass) that is occupied
+        t_0 = round(n * frac_t * self.t_value)  # initial T count
+        a_0 = round(n - (self.t_value / self.a_value) * t_0)  # initial A count
 
         for i in range(t_0):
             occupancy = self._occupancy()
@@ -138,21 +139,31 @@ class Grid:
         x_count = []
         times = []
         plots = []
-        cmaplist = [(1, 1, 1, 1), (0, 0.8, 0.2, 1), (0, 0, 1, 1), (0.7, 0.2, 0, 1), (0.8, 0, 0.1, 1)]
+        cmaplist = [(1, 1, 1, 1), (0, 0.8, 0.2, 1), (0, 0, 1, 1), (0.7, 0.2, 0, 1), (1, 0.8, 0, 1)]
         no_d_cmaplist = [(1, 1, 1, 1), (0, 0.8, 0.2, 1), (0, 0, 1, 1)]
         my_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, len(cmaplist))
         no_d_cmap = mpl.colors.LinearSegmentedColormap.from_list('Custom cmap', no_d_cmaplist, len(no_d_cmaplist))
         while self.time < time:
             interval += 1
-            if interval % 100 == 0:
+            if interval % 1000 == 0:
                 print(f'{int(round(self.time / time, 2)* 100)}% completed')
             if interval % 1000 == 0 and anim:
                 _, _, d_count = self._counts()
-                anim_grid = im_frame(self.grid, self.a_idx, self.t_idx, self.d_idx)
+                anim_grid = im_frame(self.grid, self.size, self.a_idx, self.t_idx, self.d_idx)
                 cmap = no_d_cmap if d_count == 0 else my_cmap
                 p = plt.imshow(anim_grid, animated=True, cmap=cmap)
-                plt.axis('off')
+                ax = plt.gca()
+                ax.set_xticks(np.arange(0, 2*self.size))
+                ax.set_yticks(np.arange(0, 2*self.size))
+
+                ax.set_xticks(np.arange(-.5, 2 * self.size, 2), minor=True)
+                ax.set_yticks(np.arange(-.5, 2 * self.size, 2), minor=True)
+
+                ax.set_xticklabels([''])
+                ax.set_yticklabels([''])
+                plt.grid(which='minor', color='k', linewidth=1)
                 plots.append([p])
+                print(self._counts())
             rxn, r_tot, locs = self.rxn_choice(r)
             if rxn in {'a', 'b', 'c'}:
                 choice_idx = np.random.randint(0, len(locs[0]))
@@ -213,10 +224,11 @@ class Grid:
                     if num_open_spots == 0:
                         print(elements)
                         print(occupancy)
-                    location = random.randint(0, num_open_spots-1)
-                    x, y = open_spots[0][location], open_spots[1][location]
-                    self.grid[x, y, self.val_to_idx[elt_val]] += 1
-                    # TODO: Could maybe be edge cases where this breaks - look into this
+                    else:  # As long as there is at least one possible open spot to place the element
+                        # if there is no space, the element will just not get added.
+                        location = random.randint(0, num_open_spots-1)
+                        x, y = open_spots[0][location], open_spots[1][location]
+                        self.grid[x, y, self.val_to_idx[elt_val]] += 1
 
             # Advance time
             dt = expon(scale=r_tot).rvs()
@@ -230,11 +242,11 @@ class Grid:
         return a_count, t_count, d_count, x_count, times, plots
 
 
-def im_frame(grid, a_idx, t_idx, d_idx):
+def im_frame(grid, size, a_idx, t_idx, d_idx):
     a_grid = grid[:, :, a_idx]
     t_grid = grid[:, :, t_idx]
     d_grid = grid[:, :, d_idx]
-    new_grid = np.zeros((20, 20))
+    new_grid = np.zeros((2 * size, 2 * size))
     ax, ay = np.where(a_grid > 0)
     tx, ty = np.where(t_grid > 0)
     dx, dy = np.where(d_grid > 0)
@@ -270,36 +282,44 @@ def im_frame(grid, a_idx, t_idx, d_idx):
                     new_grid[2 * x + 1, 2 * y + 1] = 1
     return new_grid
 
-
+# TODO: refactor into: single set of params (plot trajectory), iterated runs, and single set (animation)
 def main():
     fig = plt.figure()
-    iterations = 1
-    for s in range(iterations):
+    seeds = [0, 1, 2]
+    for s in seeds:
         print('S:', s)
         random.seed(s)
         np.random.seed(s)
         a_rate = 1e-1
         b_rate = 1e-2
         c_rate = 1e-4
-        frac_occupied = 0.1
-        chemostat_rate = 0.001
-        diffusion_param = 0.01
-        grid = Grid(size=10,
-                    a=a_rate,
-                    b=b_rate,
-                    c=c_rate,
-                    f=frac_occupied,
-                    m=diffusion_param)
+        frac_occupied = 0.3
+        for c, d in [(0.001, 0.01), (0.001, 0.1)]:
+            chemostat_rate = c
+            diffusion_param = d
+            grid_size = 50
+            sim_time = 10000000
+            start = time.time()
+            grid = Grid(size=grid_size,
+                        a=a_rate,
+                        b=b_rate,
+                        c=c_rate,
+                        f=frac_occupied,
+                        m=diffusion_param)
 
-        A, T, D, x_counts, times, plots = grid.gillespie(500, chemostat_rate, anim=True)
-
-        # Write x_counts to file
-
-        # with open(f'counts_chemostat_million_steps_{s}.txt', 'w+') as f:
-        #     for i in range(len(x_counts)):
-        #         x = x_counts[i]
-        #         t = times[i]
-        #         f.write(f'{t} {x}\n')
+            a, t, d, x_counts, times, plots = grid.gillespie(sim_time, chemostat_rate, anim=False)
+            end = time.time()
+            # print('Net time: ', end - start)
+            # print(f'Final element counts: A: {a}, T: {t}, D: {d}')
+            # Write x_counts to file
+            print(f'seed {s}, exchange rate {chemostat_rate} diffusion {diffusion_param}')
+            with open(f'results/4_2_{s}_{chemostat_rate}_{diffusion_param}_{grid_size}.txt', 'w+') as f:
+                f.write(f'{s} {a_rate} {b_rate} {c_rate} {frac_occupied} {chemostat_rate} {diffusion_param} '
+                        f'{grid_size} {sim_time}')
+                for i in range(len(x_counts)):
+                    x = x_counts[i]
+                    t = times[i]
+                    f.write(f'{t} {x}\n')
 
         # Histogram of T_counts over trajectories
 
@@ -307,25 +327,22 @@ def main():
         # plt.xlabel('Number of T')
         # plt.ylabel('Timesteps with number of T present')
         # plt.title('Histogram of counts of T for 3 trajectories')
-        # plt.show()
 
         # x_count trajectories
 
-        # print(f'Final element counts: A: {A}, T: {T}, D: {D}')
         # plt.plot(times, x_counts)
         # plt.xlabel('timesteps')
         # plt.ylabel('Number of T elements')
         # plt.title(f'Trajectories of T counts for {round(frac_occupied * 100)}% occupied')
-        # plt.show()
-
+    #
     # plt.show()
 
     # Animation
 
-    ani = animation.ArtistAnimation(fig, plots, interval=500, blit=True, repeat_delay=2000)
+    # ani = animation.ArtistAnimation(fig, plots, interval=400, blit=True, repeat_delay=2000)
     # ani.save('a.html')
-    plt.grid(color='k')
-    plt.show()
+    # plt.grid(color='k')
+    # plt.show()
 
 
 if __name__ == '__main__':
