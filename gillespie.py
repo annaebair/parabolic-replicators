@@ -9,6 +9,7 @@ from scipy.stats import expon
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import pickle
 
 
 def _im_frame(grid, size, a_idx, t_idx, d_idx):
@@ -251,7 +252,7 @@ class Grid:
             self._move(self.d_value)
         return r_tot
 
-    def gillespie(self, time, anim):
+    def gillespie(self, time, anim, seed=None):
         interval = 0
         x_count = []
         times = []
@@ -266,6 +267,9 @@ class Grid:
             if interval % 100000 == 0:
                 if interval % 100000 == 0:
                     print(f'{int(round(self.time / time, 2)* 100)}% completed')
+                    if seed:
+                        pickle.dump(self.grid, open(f'sample_stationarity_analysis_/{seed}_{interval}_{self.phi}_{self.diffusion}_{time}', 'wb'))
+
                 if anim:
                     _, _, d_count = self._counts()
                     anim_grid = _im_frame(self.grid, self.size, self.a_idx, self.t_idx, self.d_idx)

@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 from collections import deque
 import numpy as np
+import pandas as pd
 import os
-
 
 def average_trajectories(params_string):
     """
@@ -76,7 +76,9 @@ def average_trajectories(params_string):
     plt.show()
 
 
-def detect_stationarity(num_intervals):
+def detect_stationarity(interval_length):
+    num_intervals_for_stationarity = 5
+    stationarity_info = {}
     path = 'sim_data/'
     if os.path.exists(path):
         items = os.listdir(path)
@@ -88,45 +90,75 @@ def detect_stationarity(num_intervals):
                 # TODO reformulate so that the first line is read in as the parameters and all subsequent lines are data
                 for row in f:
                     if len(row) > 25:
-                        seed, a_rate, b_rate, c_rate, frac_occupied, phi, diffusion_param, frac_x, grid_size, sim_time = row.split()
+                        param_lst = row.split()
+                        if len(param_lst) == 9:
+                            seed, a_rate, b_rate, c_rate, frac_occupied, phi, diffusion, grid_size, sim_time = row.split()
+                        else:
+                            seed, a_rate, b_rate, c_rate, frac_occupied, phi, diffusion, grid_size, sim_time, junk = row.split()
+                            sim_time = 5000000
                     elif len(row) > 0:
                         t, x = row.split()
                         t, x = float(t), float(x)
                         times.append(t)
                         x_counts.append(x)
-
-            interval = float(sim_time) / num_intervals
-            checkpoint = interval
+            print(param)
+            checkpoint = interval_length
             to_average = []
             idx = 0
             prev_avg = 0
             tau_s = None
-            for t in times[:-1]:
+            avg_val = None
+            std_val = None
+            criterion_satisfied = 0 
+            for i in range(len(times[:-1])):
+                t = times[i]
                 if t > checkpoint:
-                    checkpoint += interval
-                    avg = np.mean(to_average)
-                    stdev = np.std(to_average)
-                    if abs(avg-prev_avg) < stdev:
-                        tau_s = t
-                        break
-                    else:
+                    checkpoint += interval_length   # Set the location of the next checkpoint
+                    avg = np.mean(to_average)   # Average the interval that just ended
+                    stdev = np.std(to_average)  # Standard dev of interval that just ended
+                    if abs(avg-prev_avg) < stdev:   # If criterion is satisfied
+                        if criterion_satisfied == num_intervals_for_stationarity: # If enough consecutive intervals satisfy criterion.
+                            tau_s = t   # Stationarity point detected bc two consecutive intervals
+                            avg_val = np.mean(x_counts[i:]) # Get average value of trajectory after stationarity
+                            std_val = np.std(x_counts[i:])  # Get stdev of trajectory after stationarity
+                            break
+                        else:   # Not previously satisfied but want to indicte this interval
+                            criterion_satisfied += 1
+                    else:   # Criterion is not satisfied on this interval
                         to_average = [x_counts[idx]]
                         prev_avg = avg
+                        criterion_satisfied = 0 # Ensure that criterion_satisfied is false regardless of previous
                 else:
                     to_average.append(x_counts[idx])
                 idx += 1
-            plt.clf()
-            plt.plot(times, [i / 1250 for i in x_counts])
-            if tau_s is not None:
-                plt.axvline(x=tau_s, color='r')
-            plt.title(f'$\\varphi$:{phi}, diff:{diffusion_param}, $\\tau_s$: {tau_s}')
-            plt.ylim(0, 1)
-            plt.savefig(os.path.join(f'sim_plots/D{num_intervals}', param + ".png"))
+#            plt.clf()
+#            plt.plot(times, [i / 1248 for i in x_counts])
+#            if tau_s is not None:
+#                plt.axvline(x=tau_s, color='r')
+            # plt.title(f'$\\varphi$:{phi}, diff:{diffusion}, $\\tau_s$: {tau_s}')
+            # plt.ylim(0, 1)
+            # plt.savefig(os.path.join(f'sim_plots/interval_len_200k', param + ".png"))
+            stationarity_info[(phi, diffusion, sim_time, seed, interval_length)] = (tau_s, avg_val, std_val)
+    with open('stationarity_info_100k_10_seeds_intervals_intermediate.txt', 'w+') as f:
+       for k, v in stationarity_info.items():
+           r = [str(i) for i in k] + [str(i) for i in v]
+           string = ' '.join(r) + '\n'
+           f.write(string)
+
+
+def organize_stationarity_info():
+    df = pd.read_csv("stationarity_info.txt", sep=" ")
+    df.columns = ['phi', 'D', 'sim_time', 'seed', 'num_intervals', 'tau', 'avg', 'std']
+    df['phi'] = df['phi'].astype(float)
+    df['D'] = df['D'].astype(float)
+    df = df.sort_values(by=['phi', 'D'])
+    # print(df)
+    df.to_csv('stationarity_info.csv')
 
 
 def main():
-    detect_stationarity(num_intervals=25)
-
+    detect_stationarity(100000)
 
 if __name__ == '__main__':
     main()
+

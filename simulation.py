@@ -7,7 +7,7 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-
+import pickle
 from gillespie import Grid
 
 
@@ -53,28 +53,29 @@ def single_run_trajectory():
     plt.plot(times, x_counts)
     plt.xlabel('timesteps')
     plt.ylabel('Number of T elements')
-    plt.title(f'Trajectories of T counts')
+    plt.title('Trajectories of T counts')
     plt.show()
     # plt.savefig(f'old_sim_plots/{frac_occupied}_{phi}.png')
 
 
 def single_run_animation():
-    seed = 0
-    random.seed(seed)
-    np.random.seed(seed)
-
-    grid_size = 25
+    grid_size = 40
     a_rate = 1e-1
     b_rate = 1e-2
     c_rate = 1e-4
     frac_occupied = 0.3
     frac_x = 0.25
-    phi = 1e-7
-    diffusion_param = 1e-6
-    sim_time = 500000
+    sim_time = 30000000 
+    phi = 0.001 
+    diffusion = 0.001
+    seed = 3
 
+#    for seed in range(2, 10):
+#        random.seed(seed)
+#        np.random.seed(seed)
+#        for phi in [0.0001, 5e-5, 1e-5, 5e-6, 1e-6]:
+#            for diffusion in [0.01, 0.001, 0.0001, 1e-5, 1e-6]:
     fig = plt.figure()
-
     grid = Grid(size=grid_size,
                 a=a_rate,
                 b=b_rate,
@@ -82,23 +83,26 @@ def single_run_animation():
                 fraction_occupied=frac_occupied,
                 fraction_x=frac_x,
                 phi=phi,
-                diffusion=diffusion_param)
+                diffusion=diffusion)
 
-    x_counts, times, plots = grid.gillespie(sim_time, anim=False)
-    g = copy.deepcopy(grid.grid)
-    g = g @ [0, 0.5, 1]
-    zero_grid = np.zeros(g.shape)
-    ones_grid = np.ones(g.shape)
-    filtered_grid = np.where(g != 0, ones_grid, zero_grid)
-    plt.imshow(filtered_grid)
-    plt.savefig(f'snapshot')
-    ftimage = np.fft.fft2(filtered_grid)
-    ftimage = np.fft.fftshift(ftimage)
-    plt.clf()
-    plt.imshow(np.abs(ftimage))
-    plt.colorbar()
-    plt.show()
+    x_counts, times, plots = grid.gillespie(sim_time, anim=False, seed=seed)
+    pickle.dump(grid.grid, open(f'pickled_fourier_grids/{seed}_{grid_size}_{phi}_{diffusion}_{sim_time}', 'wb'))
 
+    # Write x_counts to file
+#    print(f'seed {seed}, phi {phi}, diffusion {diffusion}')
+#    with open(f'sim_data/{sim_time}_{phi}_{diffusion}_{grid_size}_{seed}.txt', 'w+') as f:
+#        f.write(f'{seed} {a_rate} {b_rate} {c_rate} {frac_occupied} {phi} {diffusion} '
+#                f'{grid_size} {sim_time}\n')
+#        for i in range(len(x_counts)):
+#            x = x_counts[i]
+#            t = times[i]
+#            f.write(f'{t} {x}\n')
+
+#            g = grid_copy @ [0, 0.5, 1]
+#            filtered_grid = g - np.mean(g)
+#            ftimage = np.fft.fft2(filtered_grid)
+#            # ftimage = np.fft.fftshift(ftimage)
+#            absftimage = np.abs(ftimage)
 
 def iterated_runs():
     # seed = 0
@@ -145,17 +149,17 @@ def iterated_runs():
                 # plt.title(f'Fourier transform of final g rid with $\\varphi$={phi}, D={diffusion}')
                 # plt.savefig(f'fourier_plots/{phi}_{diffusion}_fourier_inv.png')
                 # # Write x_counts to file
-                with open(f'sim_data/5mil_{phi}_{diffusion}_seed{seed}.txt', 'w+') as f:
-                    f.write(f'{seed} {a_rate} {b_rate} {c_rate} {frac_occupied} {phi} {diffusion} '
-                            f'{frac_x} {grid_size} {sim_time}\n')
-                    for i in range(len(x_counts)):
-                        x = x_counts[i]
-                        t = times[i]
-                        f.write(f'{t} {x}\n')
+                # with open(f'sim_data/5mil_{phi}_{diffusion}_seed{seed}.txt', 'w+') as f:
+                #     f.write(f'{seed} {a_rate} {b_rate} {c_rate} {frac_occupied} {phi} {diffusion} '
+                #             f'{frac_x} {grid_size} {sim_time}\n')
+                #     for i in range(len(x_counts)):
+                #         x = x_counts[i]
+                #         t = times[i]
+                #         f.write(f'{t} {x}\n')
 
 
 def main():
-    iterated_runs()
+    single_run_animation()
 
 
 if __name__ == '__main__':
