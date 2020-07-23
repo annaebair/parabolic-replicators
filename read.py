@@ -4,6 +4,26 @@ import numpy as np
 import pandas as pd
 import os
 
+def plot():
+    path = 'results/'
+    if os.path.exists(path):
+        items = os.listdir(path)
+        for item in items:
+            x_counts = []
+            times = []
+            with open(os.path.join(path,item)) as f:
+                for row in f:
+                    if len(row) > 25:
+                        seed, a_rate, b_rate, c_rate, d_rate, e_rate, frac_occupied, phi, diffusion, w, grid_size, sim_time = row.split()
+                    elif len(row) > 0:
+                        t, x = row.split()
+                        t, x = float(t), float(x)
+                        times.append(t)
+                        x_counts.append(x)
+    fractional_x_counts = [x / int(grid_size) ** 2 for x in x_counts]
+    plt.plot(times, fractional_x_counts)
+    plt.show()
+
 def average_trajectories(params_string):
     """
     Averages the trajectories for the given params_string on two different seeds
@@ -157,7 +177,7 @@ def organize_stationarity_info():
 
 
 def main():
-    detect_stationarity(100000)
+    plot()
 
 if __name__ == '__main__':
     main()
